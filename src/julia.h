@@ -1754,6 +1754,22 @@ typedef struct {
 #define jl_exception_in_transit (jl_get_ptls_states()->exception_in_transit)
 #define jl_task_arg_in_transit (jl_get_ptls_states()->task_arg_in_transit)
 
+
+// codegen interface ----------------------------------------------------------
+
+typedef struct {
+    int cached;         // can the compiler consult/mutate the compilation cache?
+
+    // language features: -1=disallowed, 0=disabled (fallback or error), 1=allowed
+    int runtime;            // can we call into the runtime?
+    int exceptions;         // are exceptions supported (requires runtime, fallback: trap)?
+    int track_allocations;  // can we track allocations (fallback: don't)?
+    int code_coverage;      // can we measure coverage (fallback: don't)?
+    int static_alloc;       // is the compiler allowed to allocate statically?
+    int dynamic_alloc;      // is the compiler allowed to allocate dynamically (requires runtime)?
+} jl_cgparams_t;
+extern JL_DLLEXPORT jl_cgparams_t jl_default_cgparams;
+
 #ifdef __cplusplus
 }
 #endif

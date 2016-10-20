@@ -26,6 +26,25 @@ static Value *prepare_call(Value *Callee)
 }
 
 
+// --- feature checks ---
+
+// require a feature to be allowed and enabled
+#define JL_FEAT_REQUIRE(ctx, feature) \
+    if ((ctx)->params->feature < 1) \
+        jl_errorf("%s for %s:%d requires the " #feature " language feature, which is disabled or not allowed", \
+                  __FUNCTION__, (ctx)->file.str().c_str(), *(ctx)->line);
+
+// require a feature to be allowed, and branch on whether it is enabled
+#define JL_FEAT_TEST(ctx, feature) \
+    _feat_test(ctx, __FUNCTION__, (ctx)->params->feature, #feature)
+static inline bool _feat_test(jl_codectx_t* ctx, const char *caller, int featval, const char *featname) {
+    if (featval < 0)
+        jl_errorf("%s for %s requires the %s language feature, which is not allowed",
+                  caller, ctx->file.str().c_str(), *ctx->line, featname);
+    return (featval > 0);
+}
+
+
 // --- string constants ---
 static StringMap<GlobalVariable*> stringConstants;
 static Value *stringConstPtr(IRBuilder<> &builder, const std::string &txt)
@@ -660,11 +679,20 @@ static void error_unless(Value *cond, const std::string &msg, jl_codectx_t *ctx)
 static void raise_exception(Value *exc, jl_codectx_t *ctx,
                             BasicBlock *contBB=nullptr)
 {
+    if (!JL_FEAT_TEST(ctx, exceptions)) {
+        llvm::Value *Trap = Intrinsic::getDeclaration(jl_Module, Intrinsic::trap);
+        CallInst *TrapCall = builder.CreateCall(Trap);
+        TrapCall->setDoesNotReturn();
+        TrapCall->setDoesNotThrow();
+    } else {
+        JL_FEAT_REQUIRE(ctx, runtime);
 #if JL_LLVM_VERSION >= 30700
-    builder.CreateCall(prepare_call(jlthrow_func), { exc });
+        builder.CreateCall(prepare_call(jlthrow_func), { exc });
 #else
-    builder.CreateCall(prepare_call(jlthrow_func), exc);
+        builder.CreateCall(prepare_call(jlthrow_func), exc);
 #endif
+    }
+
     builder.CreateUnreachable();
     if (!contBB) {
         contBB = BasicBlock::Create(jl_LLVMContext, "after_throw", ctx->f);
@@ -1566,6 +1594,9 @@ static void emit_cpointercheck(const jl_cgval_t &x, const std::string &msg, jl_c
 // allocation for known size object
 static Value *emit_allocobj(jl_codectx_t *ctx, size_t static_size, Value *jt)
 {
+    JL_FEAT_REQUIRE(ctx, dynamic_alloc);
+    JL_FEAT_REQUIRE(ctx, runtime);
+
     int osize;
     int offset = jl_gc_classify_pools(static_size, &osize);
     Value *ptls_ptr = emit_bitcast(ctx->ptlsStates, T_pint8);
